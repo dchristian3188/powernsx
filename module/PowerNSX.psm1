@@ -27789,6 +27789,120 @@ function Remove-NsxFirewallRule {
     end {}
 }
 
+function Set-NsxFirewallRule {
+    
+        <#
+        .SYNOPSIS
+        Sets the specified NSX Distributed Firewall Rule.
+    
+        .DESCRIPTION
+        An NSX Distributed Firewall Rule defines a typical 5 tuple rule and is
+        enforced on each hypervisor at the point where the VMs NIC connects to the
+        portgroup or logical switch.
+    
+        This cmdlet sets the specified NSX Distributed Firewall Rule.
+    
+        .EXAMPLE
+        PS C:\> Get-NsxFirewallRule -RuleId 1144 | Set-NsxFirewallRule -Logged $true
+    
+        #>
+    
+        param (
+    
+            [Parameter (Mandatory=$true,ValueFromPipeline=$true,Position=1)]
+                [ValidateNotNull()]
+                [System.Xml.XmlElement]$Rule,
+            [Parameter (Mandatory=$false)]
+                # Source(s) of traffic to hit the rule.  IP4/6 members are specified as string, any other member as the appropriate VI or PowerNSX object.
+                [ValidateScript({ ValidateFirewallRuleSourceDest $_ })]
+                [object[]]$Source,
+            [Parameter (Mandatory=$false)]
+                # Negate the list of sources hit by the rule
+                [ValidateNotNullOrEmpty()]
+                [switch]$NegateSource,
+            [Parameter (Mandatory=$false)]
+                # Destination(s) of traffic to hit the rule.  IP4/6 members are specified as string, any other member as the appropriate VI or PowerNSX object.
+                [ValidateScript({ ValidateFirewallRuleSourceDest $_ })]
+                [object[]]$Destination,
+            [Parameter (Mandatory=$false)]
+                [ValidateNotNullOrEmpty()]
+                [switch]$NegateDestination,
+            [Parameter (Mandatory=$false)]
+                # Negate the list of destinations hit by the rule
+                [ValidateScript ({ ValidateFirewallRuleService $_ })]
+                [object[]]$Service,
+            [Parameter ()]
+                [bool]
+                $Logged,
+            [Parameter ()]
+                [bool]
+                $Disabled,
+            [Parameter (Mandatory=$False)]
+                #PowerNSX Connection object
+                [ValidateNotNullOrEmpty()]
+                [PSCustomObject]$Connection=$defaultNSXConnection,
+            [Parameter ()]
+                [switch]
+                $PassThru
+        )
+    
+        begin {
+    
+        }
+    
+        process {
+
+            $section = get-nsxFirewallSection $Rule.parentnode.name -connection $connection
+            $generationNumber = $section.generationNumber
+            
+            if($PSBoundParameters['Logged'] -ne $null)
+            {
+                $Rule.logged = $Logged.ToString()
+            }
+
+            if($PSBoundParameters['Disabled'] -ne $null)
+            {
+                $Rule.disabled = $Disabled.ToString()
+            }
+
+            if($Source)
+            {
+                $null = $Rule.sources | ForEach-Object -Process {$_.ParentNode.RemoveChild($_)}
+                Add-NsxSourceDestNode -Rule $Rule -Nodetype "sources" -negated:$NegateSource
+                Add-NsxSourceDestMember -membertype "source" -memberlist $Source -rule $Rule
+            }
+
+            if($Destination)
+            {
+                $null = $Rule.destinations | ForEach-Object -Process {$_.ParentNode.RemoveChild($_)}
+                Add-NsxSourceDestNode -Rule $Rule -Nodetype "destinations" -negated:$NegateDestination
+                Add-NsxSourceDestMember -membertype "destination" -memberlist $destination -rule $Rule
+            }
+
+            if($Service)
+            {
+                $existingService = (Select-XML -XML $Rule -XPath '//services') -ne $null
+                if($existingService)
+                {
+                    $null = $Rule.services | ForEach-Object -Process {$_.ParentNode.RemoveChild($_)}
+                }
+                $Rule = New-NsxServiceNode -itemType "service" -itemlist $service -xmlDoc $Rule
+            }
+
+            $IfMatchHeader = @{"If-Match"=$generationNumber}
+            $URI = "/api/4.0/firewall/globalroot-0/config/$($Section.ParentNode.name.tolower())/$($Section.Id)/rules/$($Rule.id)"
+            Write-Progress -activity "Setting Rule $($Rule.Name)"
+            $null = invoke-NsxWebRequest -method "put" -uri $URI  -extraheader $IfMatchHeader -connection $connection -body ($Rule | Format-XML)
+            write-progress -activity "Setting Rule $($Rule.Name)" -completed
+
+            if($PassThru)
+            {
+                Get-NsxFirewallRule -RuleId $Rule.ID
+            }
+        }
+    
+        end {}
+    }
 function Get-NsxFirewallExclusionListMember {
 
     <#
